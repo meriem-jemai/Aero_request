@@ -1,5 +1,5 @@
 import pygame
-import gym
+import gymnasium as gym
 from Aerorequest.env.Player import HumanPlayer
 
 def main():

@@ -1,18 +1,12 @@
 import os
-import sys
 from math import sin, cos, pi, sqrt
-from random import randrange
-import gym
+import gymnasium as gym
 import numpy as np
 import pygame
-from gym import spaces
-
-current_dir = os.path.dirname(os.path.realpath(__file__))
-env_dir = os.path.join(current_dir, 'env')
-sys.path.append(env_dir)
-
+from gymnasium import spaces
 from .Player import HumanPlayer
 
+RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
 
 class Aerorequest(gym.Env):
     """
@@ -101,40 +95,41 @@ class Aerorequest(gym.Env):
         
     def load_sprites(self):
         """
-        Load player and target sprites.
+        Load player, target, sun and cloud sprites.
         """
-        # Loading player sprite
-        self.player_width = 80
-        player_image = pygame.image.load(os.path.join("Aero_request\\Aerorequest\\env\\ressources\\drone1.png"))
-        self.player_image = pygame.transform.scale(player_image, (self.player_width, int(self.player_width * 0.30)))
+        def load(name):
+            return pygame.image.load(os.path.join(RESOURCES_DIR, name))
 
-        # Loading target sprite
+        # Player
+        self.player_width = 80
+        self.player_image = pygame.transform.scale(
+            load("drone1.png"), (self.player_width, int(self.player_width * 0.30))
+        )
+
+        # Target
         self.target_width = 50
         self.target_height = 50
-        target_image = pygame.image.load(os.path.join("Aero_request\\Aerorequest\\env\\ressources\\target1.png"))
-        self.target_image = pygame.transform.scale(target_image, (self.target_width, self.target_height))
-        
-        self.targets = [] # To store positions of target
-
+        self.target_image = pygame.transform.scale(
+            load("target1.png"), (self.target_width, self.target_height)
+        )
+        self.targets = []
         self.spawn_target()
-        # Loading sun sprite
-        sun_image = pygame.image.load(os.path.join("Aero_request\\Aerorequest\\env\\ressources\\sun.png"))
-        self.sun_image = pygame.transform.scale(sun_image, (300, 300))  
 
-        # Loading cloud sprites
-        cloud1_image = pygame.image.load(os.path.join("Aero_request\\Aerorequest\\env\\ressources\\cloud1.png"))
-        cloud2_image = pygame.image.load(os.path.join("Aero_request\\Aerorequest\\env\\ressources\\cloud2.png"))
+        # Background
+        self.sun_image = pygame.transform.scale(load("sun.png"), (300, 300))
         self.cloud_images = [
-            pygame.transform.scale(cloud1_image, (200, 100)),  
-            pygame.transform.scale(cloud2_image, (150, 75))    
+            pygame.transform.scale(load("cloud1.png"), (200, 100)),
+            pygame.transform.scale(load("cloud2.png"), (150, 75)),
         ]
-
 
     def spawn_target(self):
         """
-        Spawn a new target.
+        Spawn a new target at a random position.
         """
-        self.targets = [(randrange(100, self.WIDTH - 100), randrange(100, self.HEIGHT - 100))]
+        x = int(self.np_random.integers(100, self.WIDTH - 100))
+        y = int(self.np_random.integers(100, self.HEIGHT - 100))
+        self.targets = [(x, y)]
+
 
     def spawn_player(self):
         """
@@ -426,29 +421,27 @@ class Aerorequest(gym.Env):
             }
             return observation
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         """
         Reset the environment.
 
         Returns:
-            tuple: Initial observation of the environment and additional information.
+            tuple: Initial observation and info dict.
         """
+        super().reset(seed=seed)
         self.spawn_player()
 
-        # Reset targets and score
         self.targets = []
         self.spawn_target()
         self.score = 0
 
-        # Reset time and step count
         self.time = 0
         self.step_count = 0
 
-        # Get observation and info
         observation = self._get_obs()
         info = self._get_info()
 
-        if self.render_mode == 'human':
+        if self.render_mode == "human":
             self._render_frame_human()
 
         return observation, info

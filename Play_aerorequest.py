@@ -1,5 +1,5 @@
-import gym
-from gym.utils.play import play
+import gymnasium as gym
+from gymnasium.utils.play import play
 from Aerorequest.env import aerorequest
 
 if __name__ == "__main__":

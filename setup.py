@@ -12,6 +12,6 @@ setup(
     install_requires=[
         "gymnasium",
         "numpy",
-        "pygame",
+        "pygame-ce",
     ],
 )
