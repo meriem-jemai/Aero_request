@@ -144,111 +144,80 @@ class Aerorequest(gym.Env):
 
     def step(self, action):
         """
-        Take a step in the environment.
+        Apply one action and advance the simulation by one frame.
 
-        Args:
-            action (int): Action taken by the agent.
+        Actions: 0 = thrust up, 1 = thrust down, 2 = rotate left, 3 = rotate right
 
         Returns:
-            observation (object): Agent's observation of the current environment.
-            reward (float): Reward from the previous action.
-            done (bool): Whether the episode has ended
-            info (dict): Additional information.(Positions and distance).
+            observation, reward, terminated, truncated, info
         """
-        reward = 0.0  # to modify it later for RL agent
-        done = False
-        info = {}
-        # Initialize thruster_left and thruster_right with default values
-        thruster_left = self.player.thruster_mean
-        thruster_right = self.player.thruster_mean
-        if not self.player.dead:
-            # Initialize accelerations
-            x_acceleration = 0
-            y_acceleration = self.gravity
-            angular_acceleration = 0
+        reward = 0.0
+        terminated = False
+        truncated = False
 
-            # Calculate propeller force based on action
-            if action == 0:  # UP
-                thruster_left = self.player.thruster_mean + self.player.thruster_amplitude
-                thruster_right = self.player.thruster_mean + self.player.thruster_amplitude
-            elif action == 1:  # DOWN
-                thruster_left = self.player.thruster_mean - self.player.thruster_amplitude
-                thruster_right = self.player.thruster_mean - self.player.thruster_amplitude
-            elif action == 2:  # LEFT
-                thruster_left = self.player.thruster_mean - self.player.diff_amplitude
-                thruster_right = self.player.thruster_mean
-            elif action == 3:  # RIGHT
-                thruster_left = self.player.thruster_mean
-                thruster_right = self.player.thruster_mean - self.player.diff_amplitude
+        # Thruster forces for the chosen action
+        left = right = self.player.thruster_mean
+        if action == 0:
+            left = right = self.player.thruster_mean + self.player.thruster_amplitude
+        elif action == 1:
+            left = right = self.player.thruster_mean - self.player.thruster_amplitude
+        elif action == 2:
+            left = self.player.thruster_mean - self.player.diff_amplitude
+        elif action == 3:
+            right = self.player.thruster_mean - self.player.diff_amplitude
 
-            # Calculate accelerations according to Newton's laws of motion
-            x_acceleration += (
-                    -(thruster_left + thruster_right) * sin(self.player.angle * pi / 180) / self.mass
-            )
-            y_acceleration += (
-                    -(thruster_left + thruster_right) * cos(self.player.angle * pi / 180) / self.mass
-            )
-            angular_acceleration += self.arm * (thruster_right - thruster_left) / self.mass
+        # Physics (Newton's laws)
+        angle_rad = self.player.angle * pi / 180
+        x_acceleration = -(left + right) * sin(angle_rad) / self.mass
+        y_acceleration = self.gravity - (left + right) * cos(angle_rad) / self.mass
+        angular_acceleration = self.arm * (right - left) / self.mass
 
-            # Update Player speed
-            self.player.x_speed += x_acceleration
-            self.player.y_speed += y_acceleration
-            self.player.angular_speed += angular_acceleration
+        self.player.x_speed += x_acceleration
+        self.player.y_speed += y_acceleration
+        self.player.angular_speed += angular_acceleration
 
-            # Update Player position
-            self.player.x_position += self.player.x_speed
-            self.player.y_position += self.player.y_speed
-            self.player.angle += self.player.angular_speed
+        self.player.x_position += self.player.x_speed
+        self.player.y_position += self.player.y_speed
+        self.player.angle += self.player.angular_speed
 
-            # Calculate distance to target
-            dist = sqrt((self.player.x_position - self.targets[0][0]) ** 2 +
-                        (self.player.y_position - self.targets[0][1]) ** 2)
+        # Reward for getting closer to the target
+        dist = self._distance_to_target()
+        reward += (self.prev_dist - dist) / 100
+        self.prev_dist = dist
 
-            # If target reached, respawn target and update score
-            if dist < 50:
-                self.spawn_target()
-                self.score += 10  # Increase score when target reached
+        # Target reached
+        if dist < 50:
+            reward += 10.0
+            self.score += 10
+            self.spawn_target()
+            self.prev_dist = self._distance_to_target()
 
-            # If too far, die and respawn after timer
-            elif dist > 1000:
-                self.player.dead = True
-                self.player.respawn_timer = self.respawn_timer_max
+        # Crash: leaving the screen ends the episode
+        if not (0 <= self.player.x_position <= self.WIDTH and 0 <= self.player.y_position <= self.HEIGHT):
+            reward -= 10.0
+            terminated = True
+            self.flash_edges()
 
-            # Check if player touches the bounds of the screen
-            if (self.player.x_position < 0 or self.player.x_position > self.WIDTH or
-                    self.player.y_position < 0 or self.player.y_position > self.HEIGHT):
-                self.player.dead = True
-                self.player.respawn_timer = self.respawn_timer_max
-                # Flash the edges red
-                self.flash_edges()                 
-        else:
-            # Decrement respawn timer and respawn if timer reaches 0
-            self.player.respawn_timer -= 1 / self.FPS
-            if self.player.respawn_timer < 0:
-                self.spawn_player()
-                info['status'] = 'Player died'
-
-        # Check if game is over
-        if self.time >= self.time_limit:
-            # Game over, reset time and end game
-            self.time = 0
-            done = True
-            info['status'] = 'Time Limit Exceeded.. will start new Episode'
-            self.reset()  # Reset the environment
-
-        # Increment time
+        # Time limit
         self.time += 1 / self.FPS
-
-        # Update step count
         self.step_count += 1
+        if self.time >= self.time_limit:
+            truncated = True
 
         observation = self._get_obs()
         info = self._get_info()
 
-        if self.render_mode == 'human':
+        if self.render_mode == "human":
             self._render_frame_human()
 
-        return observation, reward, done, False ,info
+        return observation, reward, terminated, truncated, info
+
+    def _distance_to_target(self):
+        """
+        Euclidean distance between the drone and the current target.
+        """
+        return sqrt((self.player.x_position - self.targets[0][0]) ** 2 +
+                    (self.player.y_position - self.targets[0][1]) ** 2)
 
     def flash_edges(self):
         """
@@ -433,6 +402,7 @@ class Aerorequest(gym.Env):
 
         self.targets = []
         self.spawn_target()
+        self.prev_dist = self._distance_to_target()
         self.score = 0
 
         self.time = 0
