@@ -2,6 +2,8 @@
 
 ![tests](https://github.com/meriem-jemai/Aero_request/actions/workflows/tests.yml/badge.svg)
 
+**[▶ Play it in your browser](https://meriem-jemai.github.io/Aero_request/)** (no installation needed)
+
 A custom reinforcement learning environment built with **Gymnasium** and **Pygame**.
 A 2D drone with two thrusters has to fly to randomly placed targets without leaving the screen.
 The physics (gravity, thrust, momentum, rotation) make it a small but non-trivial control problem.
@@ -15,6 +17,7 @@ The physics (gravity, thrust, momentum, rotation) make it a small but non-trivia
 - Seeding support for reproducible episodes
 - Passes Gymnasium's official `check_env`, tested with pytest and CI
 - Trained PPO baseline that reaches ~20 targets per episode
+- Playable in the browser, built with pygbag and deployed to GitHub Pages
 
 ## Installation
 
@@ -51,8 +54,6 @@ for _ in range(1000):
 | **Termination** | drone leaves the screen |
 | **Truncation** | time limit (100 seconds at 24 FPS) |
 
-
-
 ## Results
 
 A PPO agent ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) trained for 2M steps on the feature observations, about 10 minutes on a laptop CPU.
@@ -76,14 +77,17 @@ python train.py --timesteps 2000000
 python evaluate.py
 ```
 
-
 ## Play it yourself
+
+**In the browser:** [meriem-jemai.github.io/Aero_request](https://meriem-jemai.github.io/Aero_request/)
+
+**Locally:**
 
 ```bash
 python play.py
 ```
 
-**W** thrust up · **S** thrust down · **A / D** rotate
+**W / ↑** thrust up · **S / ↓** thrust down · **A D / ← →** rotate
 
 ## Run the tests
 
@@ -98,12 +102,14 @@ pytest -q
 Aerorequest/
 ├── __init__.py          # environment registration
 └── env/
-    ├── aerorequest.py   # environment logic, physics, rendering
-    ├── Player.py        # drone state
+    ├── game.py          # core game: physics, targets, drawing (no Gymnasium)
+    ├── aerorequest.py   # Gymnasium wrapper: observations, reward, rendering
     └── resources/       # sprites
+web/main.py              # browser version (pygbag)
 tests/test_env.py        # pytest suite
 play.py                  # keyboard control
 train.py                 # PPO training
 evaluate.py              # evaluation, reward curve, GIF
 results/                 # plots and GIF used in this README
+.github/workflows/       # CI tests and GitHub Pages deploy
 ```
