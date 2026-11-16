@@ -3,3 +3,6 @@ __pycache__/
 *.egg-info/
 .venv/
 runs/
+web/game.py
+web/resources/
+web/build/
