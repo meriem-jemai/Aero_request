@@ -401,6 +401,9 @@ class Aerorequest(gym.Env):
         self.spawn_target()
         self.prev_dist = self._distance_to_target()
         self.score = 0
+        self.cloud1_pos = [150, 200]
+        self.cloud2_pos = [400, 500]
+        self.flash_timer = 0
 
         self.time = 0
         self.step_count = 0
