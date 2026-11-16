@@ -14,4 +14,5 @@ setup(
         "numpy",
         "pygame-ce",
     ],
+    extras_require={"train": ["torch", "stable-baselines3", "matplotlib", "pandas", "pillow"]},
 )

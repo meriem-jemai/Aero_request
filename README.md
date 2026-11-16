@@ -14,6 +14,7 @@ The physics (gravity, thrust, momentum, rotation) make it a small but non-trivia
 - Shaped reward for reaching targets and avoiding crashes
 - Seeding support for reproducible episodes
 - Passes Gymnasium's official `check_env`, tested with pytest and CI
+- Trained PPO baseline that reaches ~20 targets per episode
 
 ## Installation
 
@@ -50,6 +51,32 @@ for _ in range(1000):
 | **Termination** | drone leaves the screen |
 | **Truncation** | time limit (100 seconds at 24 FPS) |
 
+
+
+## Results
+
+A PPO agent ([Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3)) trained for 2M steps on the feature observations, about 10 minutes on a laptop CPU.
+
+![Trained agent](results/agent.gif)
+
+| Policy | Targets per episode | Crashes |
+|---|---|---|
+| Random | 0.3 ± 0.6 | 20 / 20 |
+| **PPO** | **19.8 ± 2.9** | **2 / 20** |
+
+*Evaluated over 20 episodes with fixed seeds.*
+
+![Reward curve](results/reward_curve.png)
+
+### Reproduce
+
+```bash
+pip install -e ".[train]"
+python train.py --timesteps 2000000
+python evaluate.py
+```
+
+
 ## Play it yourself
 
 ```bash
@@ -76,4 +103,7 @@ Aerorequest/
     └── resources/       # sprites
 tests/test_env.py        # pytest suite
 play.py                  # keyboard control
+train.py                 # PPO training
+evaluate.py              # evaluation, reward curve, GIF
+results/                 # plots and GIF used in this README
 ```
