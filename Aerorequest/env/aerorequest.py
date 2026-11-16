@@ -78,11 +78,13 @@ class Aerorequest(gym.Env):
         if obs_type == 'pixels':
             self.observation_space = spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
         elif obs_type == 'features':
+            inf = np.inf
             self.observation_space = spaces.Dict({
-                "player_position": spaces.Box(low=0, high=self.HEIGHT, shape=(2,), dtype=np.float32),#to fix
-                "player_angle": spaces.Box(low=-360, high=360, shape=(1,), dtype=np.float32),
-                "target_position": spaces.Box(low=0, high=self.WIDTH, shape=(2,), dtype=np.float32),
-                "score": spaces.Box(low=0, high=np.inf, shape=(1,), dtype=np.float32)
+                "player_position": spaces.Box(low=-inf, high=inf, shape=(2,), dtype=np.float32),
+                "player_velocity": spaces.Box(low=-inf, high=inf, shape=(2,), dtype=np.float32),
+                "player_angle": spaces.Box(low=-inf, high=inf, shape=(1,), dtype=np.float32),
+                "angular_velocity": spaces.Box(low=-inf, high=inf, shape=(1,), dtype=np.float32),
+                "target_position": spaces.Box(low=0, high=max(self.WIDTH, self.HEIGHT), shape=(2,), dtype=np.float32),
             })
         else:
             raise ValueError("Invalid observation type. Choose 'pixels' or 'features'.")
@@ -365,30 +367,25 @@ class Aerorequest(gym.Env):
 
     def _get_obs(self):
         """
-        Get the observation of the environment.
+        Build the observation for the current state.
 
         Returns:
-            np.array or dict: Observation of the environment based on the observation type.
+            np.ndarray (64x64x3) for 'pixels', dict of feature arrays for 'features'.
         """
-        if self.obs_type == 'pixels':
-            # Render the environment to get the observation
-            observation = self._render_frame()
-            # Convert the observation to a surface
-            observation_surface = pygame.surfarray.make_surface(observation)
-            # Resize the surface
-            observation_resized = pygame.transform.scale(observation_surface, (64, 64))
-            # Convert the resized surface back to a numpy array
-            observation_resized_np = pygame.surfarray.array3d(observation_resized)
-            return observation_resized_np
-        elif self.obs_type == 'features':
-            # Construct observation dictionary
-            observation = {
-                "player_position": np.array([self.player.x_position, self.player.y_position], dtype=np.float32),
-                "player_angle": np.array([self.player.angle], dtype=np.float32),
-                "target_position": np.array(self.targets[0], dtype=np.float32),
-                "score": np.array([self.score], dtype=np.float32)
-            }
-            return observation
+        if self.obs_type == "pixels":
+            frame = self._render_frame()  # (height, width, 3)
+            surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
+            small = pygame.transform.scale(surface, (64, 64))
+            return pygame.surfarray.array3d(small).swapaxes(0, 1)
+
+        p = self.player
+        return {
+            "player_position": np.array([p.x_position, p.y_position], dtype=np.float32),
+            "player_velocity": np.array([p.x_speed, p.y_speed], dtype=np.float32),
+            "player_angle": np.array([p.angle], dtype=np.float32),
+            "angular_velocity": np.array([p.angular_speed], dtype=np.float32),
+            "target_position": np.array(self.targets[0], dtype=np.float32),
+        }
 
     def reset(self, seed=None, options=None):
         """
