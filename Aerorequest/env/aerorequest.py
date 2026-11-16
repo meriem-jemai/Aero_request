@@ -1,435 +1,123 @@
-import os
-from math import sin, cos, pi, sqrt
+"""Gymnasium wrapper around the drone game."""
 import gymnasium as gym
 import numpy as np
 import pygame
 from gymnasium import spaces
-from .Player import HumanPlayer
 
-RESOURCES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources")
+from .game import FPS, HEIGHT, WIDTH, DroneGame
+
 
 class Aerorequest(gym.Env):
     """
-    Custom Gym environment for controlling a drone to reach a target.
+    Custom Gymnasium environment: control a drone to reach targets.
 
     Parameters:
-        render_mode (str): Rendering mode, either 'human' or 'rgb_array'.
-        obs_type (str): Type of observation, either 'pixels' or 'features'.
+        render_mode (str): 'human' or 'rgb_array'.
+        obs_type (str): 'pixels' (64x64 RGB image) or 'features' (state vector).
     """
 
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 24}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": FPS}
 
     def __init__(self, render_mode=None, obs_type=None):
-        """
-        Initialize the Aerorequest environment.
-
-        Args:
-            render_mode (str): Rendering mode.
-            obs_type (str): Type of observation.
-        """
-
-        # Calls the constructor of the superclass (gym.Env) to initialize the environment.
-        super(Aerorequest, self).__init__()
-
-        # Set observation type attribute
+        super().__init__()
+        if obs_type not in ("pixels", "features"):
+            raise ValueError("Invalid observation type. Choose 'pixels' or 'features'.")
         self.obs_type = obs_type
+        self.render_mode = render_mode
 
-
-        self.FPS = self.metadata["render_fps"]
-        self.WIDTH = 650
-        self.HEIGHT = 650
-        self.gravity = 0.08
-        self.mass = 1  # Mass of the drone
-        self.arm = 25  # Length of the arm of the drone
-        self.time_limit = 100
-        self.respawn_timer_max = 3
-
-        # Initialize Pygame
         pygame.init()
+        self.game = DroneGame()
         self.screen = None
-        self.FramePerSec = pygame.time.Clock()
+        self.clock = None
 
-        # Initialize player and target sprites
-        self.load_sprites()
-
-        # Initialize game variables
-        self.time = 0
-        self.step_count = 0
-
-        # Initialize player
-        self.player = HumanPlayer()
-
-        # Define action space
         self.action_space = spaces.Discrete(4)
-
-        # Initialize flashing variables
-        self.flash_duration = 0.5  # Duration of the flashing effect in seconds
-        self.flash_timer = 0  # Timer for controlling the flashing effect
-        self.flash_color = (255, 0, 0)  # Red color for flashing
-
-        self.cloud1_pos = [150, 200]
-        self.cloud2_pos = [400, 500]
-        self.cloud1_speed = 0.3
-        self.cloud2_speed = -0.2
-        self.sun_pos = [self.WIDTH-150, -100]
-
-
-        # Define observation space based on observation type
-        if obs_type == 'pixels':
+        if obs_type == "pixels":
             self.observation_space = spaces.Box(low=0, high=255, shape=(64, 64, 3), dtype=np.uint8)
-        elif obs_type == 'features':
+        else:
             inf = np.inf
             self.observation_space = spaces.Dict({
                 "player_position": spaces.Box(low=-inf, high=inf, shape=(2,), dtype=np.float32),
                 "player_velocity": spaces.Box(low=-inf, high=inf, shape=(2,), dtype=np.float32),
                 "player_angle": spaces.Box(low=-inf, high=inf, shape=(1,), dtype=np.float32),
                 "angular_velocity": spaces.Box(low=-inf, high=inf, shape=(1,), dtype=np.float32),
-                "target_position": spaces.Box(low=0, high=max(self.WIDTH, self.HEIGHT), shape=(2,), dtype=np.float32),
+                "target_position": spaces.Box(low=0, high=max(WIDTH, HEIGHT), shape=(2,), dtype=np.float32),
             })
-        else:
-            raise ValueError("Invalid observation type. Choose 'pixels' or 'features'.")
 
-        # Set render mode
-        self.render_mode = render_mode
+    @property
+    def score(self):
+        return self.game.score
 
-        # Call reset to initialize the environment
-        self.reset()
-        
-    def load_sprites(self):
-        """
-        Load player, target, sun and cloud sprites.
-        """
-        def load(name):
-            return pygame.image.load(os.path.join(RESOURCES_DIR, name))
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        self.game.reset(rng=self.np_random)
+        self.prev_dist = self.game.distance_to_target()
 
-        # Player
-        self.player_width = 80
-        self.player_image = pygame.transform.scale(
-            load("drone1.png"), (self.player_width, int(self.player_width * 0.30))
-        )
-
-        # Target
-        self.target_width = 50
-        self.target_height = 50
-        self.target_image = pygame.transform.scale(
-            load("target1.png"), (self.target_width, self.target_height)
-        )
-        self.targets = []
-        self.spawn_target()
-
-        # Background
-        self.sun_image = pygame.transform.scale(load("sun.png"), (300, 300))
-        self.cloud_images = [
-            pygame.transform.scale(load("cloud1.png"), (200, 100)),
-            pygame.transform.scale(load("cloud2.png"), (150, 75)),
-        ]
-
-    def spawn_target(self):
-        """
-        Spawn a new target at a random position.
-        """
-        x = int(self.np_random.integers(100, self.WIDTH - 100))
-        y = int(self.np_random.integers(100, self.HEIGHT - 100))
-        self.targets = [(x, y)]
-
-
-    def spawn_player(self):
-        """
-        Respawn the player.
-        """
-        # Reset player position and state
-        self.player.angle, self.player.angular_speed, self.player.angular_acceleration = 0, 0, 0
-        self.player.x_position, self.player.x_speed, self.player.x_acceleration = self.WIDTH / 2, 0, 0
-        self.player.y_position, self.player.y_speed, self.player.y_acceleration = self.HEIGHT / 2, 0, 0
-        self.player.dead = False
-        self.player.respawn_timer = 0
+        if self.render_mode == "human":
+            self._render_human()
+        return self._get_obs(), self._get_info()
 
     def step(self, action):
         """
-        Apply one action and advance the simulation by one frame.
-
-        Actions: 0 = thrust up, 1 = thrust down, 2 = rotate left, 3 = rotate right
-
         Returns:
             observation, reward, terminated, truncated, info
         """
-        reward = 0.0
-        terminated = False
-        truncated = False
+        dist, reached, crashed = self.game.step(action)
 
-        # Thruster forces for the chosen action
-        left = right = self.player.thruster_mean
-        if action == 0:
-            left = right = self.player.thruster_mean + self.player.thruster_amplitude
-        elif action == 1:
-            left = right = self.player.thruster_mean - self.player.thruster_amplitude
-        elif action == 2:
-            left = self.player.thruster_mean - self.player.diff_amplitude
-        elif action == 3:
-            right = self.player.thruster_mean - self.player.diff_amplitude
-
-        # Physics (Newton's laws)
-        angle_rad = self.player.angle * pi / 180
-        x_acceleration = -(left + right) * sin(angle_rad) / self.mass
-        y_acceleration = self.gravity - (left + right) * cos(angle_rad) / self.mass
-        angular_acceleration = self.arm * (right - left) / self.mass
-
-        self.player.x_speed += x_acceleration
-        self.player.y_speed += y_acceleration
-        self.player.angular_speed += angular_acceleration
-
-        self.player.x_position += self.player.x_speed
-        self.player.y_position += self.player.y_speed
-        self.player.angle += self.player.angular_speed
-
-        # Reward for getting closer to the target
-        dist = self._distance_to_target()
-        reward += (self.prev_dist - dist) / 100
+        # Reward: progress towards the target, +10 for reaching it, -10 for crashing
+        reward = (self.prev_dist - dist) / 100
         self.prev_dist = dist
-
-        # Target reached
-        if dist < 50:
+        if reached:
             reward += 10.0
-            self.score += 10
-            self.spawn_target()
-            self.prev_dist = self._distance_to_target()
-
-        # Crash: leaving the screen ends the episode
-        if not (0 <= self.player.x_position <= self.WIDTH and 0 <= self.player.y_position <= self.HEIGHT):
+            self.prev_dist = self.game.distance_to_target()
+        if crashed:
             reward -= 10.0
-            terminated = True
-            self.flash_edges()
 
-        # Time limit
-        self.time += 1 / self.FPS
-        self.step_count += 1
-        if self.time >= self.time_limit:
-            truncated = True
-
-        observation = self._get_obs()
-        info = self._get_info()
+        terminated = crashed
+        truncated = self.game.time >= self.game.time_limit
 
         if self.render_mode == "human":
-            self._render_frame_human()
-
-        return observation, reward, terminated, truncated, info
-
-    def _distance_to_target(self):
-        """
-        Euclidean distance between the drone and the current target.
-        """
-        return sqrt((self.player.x_position - self.targets[0][0]) ** 2 +
-                    (self.player.y_position - self.targets[0][1]) ** 2)
-
-    def flash_edges(self):
-        """
-        Flash the edges of the screen red.
-        """
-        # Set the flashing timer
-        self.flash_timer = self.flash_duration
+            self._render_human()
+        return self._get_obs(), reward, terminated, truncated, self._get_info()
 
     def render(self):
-        """
-        Render the environment.
-
-        Returns:
-            object or np.array: Rendered image or array (only for 'rgb_array' mode).
-        """
-        if self.render_mode == 'rgb_array':
+        if self.render_mode == "rgb_array":
             return self._render_frame()
-        elif self.render_mode == 'human':
-            self._render_frame_human()
-
+        if self.render_mode == "human":
+            self._render_human()
 
     def _render_frame(self):
-        """
-        Render the environment in RGB array mode.
+        """Return the current frame as an RGB array of shape (height, width, 3)."""
+        canvas = pygame.Surface((WIDTH, HEIGHT))
+        self.game.draw(canvas)
+        return np.transpose(pygame.surfarray.array3d(canvas), axes=(1, 0, 2))
 
-        Returns:
-            np.array: RGB array of the current frame.
-        """
-        # Create a new canvas with the same size as the screen
-        canvas = pygame.Surface((self.WIDTH, self.HEIGHT))
-        canvas.fill((131, 176, 181))  # Fill the canvas with a background color
-        
-        # Render clouds
-        self.cloud1_pos[0] += self.cloud1_speed
-        if self.cloud1_pos[0] > self.WIDTH:
-            self.cloud1_pos[0] = -self.cloud_images[0].get_width()  
-        canvas.blit(self.cloud_images[0], self.cloud1_pos)  
-
-        self.cloud2_pos[0] += self.cloud2_speed
-        if self.cloud2_pos[0] < -self.cloud_images[1].get_width():  
-            self.cloud2_pos[0] = self.WIDTH
-        canvas.blit(self.cloud_images[1], self.cloud2_pos) 
-
-        # Render sun
-        canvas.blit(self.sun_image, self.sun_pos)
-
-        # Render player
-        player_copy = pygame.transform.rotate(self.player_image, self.player.angle)
-        player_pos = (
-            int(self.player.x_position - player_copy.get_width() / 2),
-            int(self.player.y_position - player_copy.get_height() / 2)
-        )
-        canvas.blit(player_copy, player_pos)
-
-        # Render target
-        target_pos = (
-            self.targets[0][0] - int(self.target_image.get_width() / 2),
-            self.targets[0][1] - int(self.target_image.get_height() / 2)
-        )
-        canvas.blit(self.target_image, target_pos)
-
-        # Render time and score on the left side
-        font = pygame.font.SysFont(None, 36)
-        time_text = font.render(f"Time: {int(self.time)}", True, (255, 255, 255))
-        score_text = font.render(f"Score: {self.score}", True, (255, 255, 255))
-        canvas.blit(time_text, (20, 20))
-        canvas.blit(score_text, (20, 60))
-
-        # Check if flashing effect is active
-        if self.flash_timer > 0:
-            # Render the edges with flashing red color
-            pygame.draw.rect(canvas, self.flash_color, (0, 0, self.WIDTH, 10))  # Top edge
-            pygame.draw.rect(canvas, self.flash_color, (0, 0, 10, self.HEIGHT))  # Left edge
-            pygame.draw.rect(canvas, self.flash_color, (0, self.HEIGHT - 10, self.WIDTH, 10))  # Bottom edge
-            pygame.draw.rect(canvas, self.flash_color, (self.WIDTH - 10, 0, 10, self.HEIGHT))  # Right edge
-            # Decrement the flashing timer
-            self.flash_timer -= 1 / self.FPS
-
-        # Convert the canvas to a NumPy array
-        surface = pygame.surfarray.array3d(canvas)
-
-        return np.transpose(surface, axes=(1, 0, 2))
-
-
-    def _render_frame_human(self):
-        """
-        Render the environment in human mode.
-        """
-        if self.screen is None:  # Initialize Pygame if not already initialized
-            self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
+    def _render_human(self):
+        if self.screen is None:
+            self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
             pygame.display.set_caption("Aerorequest Environment")
-            self.FramePerSec = pygame.time.Clock()
-
-        # Display background
-        self.screen.fill((131, 176, 181))
-
-        # Render clouds
-        self.cloud1_pos[0] += self.cloud1_speed
-        if self.cloud1_pos[0] > self.WIDTH:
-            self.cloud1_pos[0] = -self.cloud_images[0].get_width()
-        self.screen.blit(self.cloud_images[0], self.cloud1_pos)
-
-        self.cloud2_pos[0] += self.cloud2_speed
-        if self.cloud2_pos[0] < -self.cloud_images[1].get_width():
-            self.cloud2_pos[0] = self.WIDTH
-        self.screen.blit(self.cloud_images[1], self.cloud2_pos)
-
-        # Render sun
-        self.screen.blit(self.sun_image, self.sun_pos)
-
-        # Render player
-        player_copy = pygame.transform.rotate(self.player_image, self.player.angle)
-        player_pos = (
-            self.player.x_position - int(player_copy.get_width() / 2),
-            self.player.y_position - int(player_copy.get_height() / 2)
-        )
-        self.screen.blit(player_copy, player_pos)
-
-        # Render target
-        target_pos = (
-            self.targets[0][0] - int(self.target_image.get_width() / 2),
-            self.targets[0][1] - int(self.target_image.get_height() / 2)
-        )
-        self.screen.blit(self.target_image, target_pos)
-
-        # Check if flashing effect is active
-        if self.flash_timer > 0:
-            # Render the edges with flashing red color
-            pygame.draw.rect(self.screen, self.flash_color, (0, 0, self.WIDTH, 10))  # Top edge
-            pygame.draw.rect(self.screen, self.flash_color, (0, 0, 10, self.HEIGHT))  # Left edge
-            pygame.draw.rect(self.screen, self.flash_color, (0, self.HEIGHT - 10, self.WIDTH, 10))  # Bottom edge
-            pygame.draw.rect(self.screen, self.flash_color, (self.WIDTH - 10, 0, 10, self.HEIGHT))  # Right edge
-            # Decrement the flashing timer
-            self.flash_timer -= 1 / self.FPS
-
-        # Render time and score on the left side
-        font = pygame.font.SysFont(None, 36)
-        time_text = font.render(f"Time: {int(self.time)}", True, (255, 255, 255))
-        score_text = font.render(f"Score: {self.score}", True, (255, 255, 255))
-        self.screen.blit(time_text, (20, 20))
-        self.screen.blit(score_text, (20, 60))
-
+            self.clock = pygame.time.Clock()
+        self.game.draw(self.screen)
         pygame.display.update()
-        self.FramePerSec.tick(self.FPS)
+        self.clock.tick(FPS)
 
     def _get_obs(self):
-        """
-        Build the observation for the current state.
-
-        Returns:
-            np.ndarray (64x64x3) for 'pixels', dict of feature arrays for 'features'.
-        """
         if self.obs_type == "pixels":
             frame = self._render_frame()  # (height, width, 3)
             surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
             small = pygame.transform.scale(surface, (64, 64))
             return pygame.surfarray.array3d(small).swapaxes(0, 1)
 
-        p = self.player
+        g = self.game
         return {
-            "player_position": np.array([p.x_position, p.y_position], dtype=np.float32),
-            "player_velocity": np.array([p.x_speed, p.y_speed], dtype=np.float32),
-            "player_angle": np.array([p.angle], dtype=np.float32),
-            "angular_velocity": np.array([p.angular_speed], dtype=np.float32),
-            "target_position": np.array(self.targets[0], dtype=np.float32),
+            "player_position": np.array([g.x, g.y], dtype=np.float32),
+            "player_velocity": np.array([g.vx, g.vy], dtype=np.float32),
+            "player_angle": np.array([g.angle], dtype=np.float32),
+            "angular_velocity": np.array([g.angular_speed], dtype=np.float32),
+            "target_position": np.array(g.target, dtype=np.float32),
         }
 
-    def reset(self, seed=None, options=None):
-        """
-        Reset the environment.
-
-        Returns:
-            tuple: Initial observation and info dict.
-        """
-        super().reset(seed=seed)
-        self.spawn_player()
-
-        self.targets = []
-        self.spawn_target()
-        self.prev_dist = self._distance_to_target()
-        self.score = 0
-        self.cloud1_pos = [150, 200]
-        self.cloud2_pos = [400, 500]
-        self.flash_timer = 0
-
-        self.time = 0
-        self.step_count = 0
-
-        observation = self._get_obs()
-        info = self._get_info()
-
-        if self.render_mode == "human":
-            self._render_frame_human()
-
-        return observation, info
-
     def _get_info(self):
-        """
-        Get additional information about the environment.
-
-        Returns:
-            dict: Dictionary containing the distance between the agent and the target.
-        """
-        agent_pos = np.array([self.player.x_position, self.player.y_position])
-        target_pos = np.array(self.targets[0])
-        distance = np.linalg.norm(agent_pos - target_pos, ord=1)
-        return {"distance": distance}
+        return {"distance": self.game.distance_to_target(), "score": self.game.score}
 
     def close(self):
-        """
-        Close the Pygame window.
-        """
         pygame.quit()
